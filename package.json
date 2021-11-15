@@ -1,0 +1,14 @@
+{
+  "name": "jsdoc-r",
+  "version": "1.0.0",
+  "description": "JSDoc template to make R package documentation",
+  "main": "publish.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "taffydb": "^2.7.3"
+  }
+}
