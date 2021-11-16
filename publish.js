@@ -1,16 +1,9 @@
-const doop = require('jsdoc/util/doop');
 const env = require('jsdoc/env');
 const fs = require('jsdoc/fs');
 const helper = require('jsdoc/util/templateHelper');
-const logger = require('jsdoc/util/logger');
 const path = require('jsdoc/path');
 const taffy = require('taffydb').taffy;
 const template = require('jsdoc/template');
-const util = require('util');
-
-const htmlsafe = helper.htmlsafe;
-const linkto = helper.linkto;
-const resolveAuthorLinks = helper.resolveAuthorLinks;
 
 let data;
 let view;
@@ -30,33 +23,6 @@ function hashToLink(doclet, hash) {
     return `<a href="${url}">${hash}</a>`;
 }
 
-function needsSignature({kind, type, meta}) {
-    let needsSig = false;
-
-    // function and class definitions always get a signature
-    if (kind === 'function' || kind === 'class') {
-        needsSig = true;
-    }
-    // typedefs that contain functions get a signature, too
-    else if (kind === 'typedef' && type && type.names &&
-        type.names.length) {
-        for (let i = 0, l = type.names.length; i < l; i++) {
-            if (type.names[i].toLowerCase() === 'function') {
-                needsSig = true;
-                break;
-            }
-        }
-    }
-    // and namespaces that are functions get a signature (but finding them is a
-    // bit messy)
-    else if (kind === 'namespace' && meta && meta.code &&
-        meta.code.type && meta.code.type.match(/[Ff]unction/)) {
-        needsSig = true;
-    }
-
-    return needsSig;
-}
-
 function getPathFromDoclet({meta}) {
     if (!meta) {
         return null;
@@ -67,33 +33,73 @@ function getPathFromDoclet({meta}) {
         meta.filename;
 }
 
+function linkifyRd(rd, packages) {
+    let out = '';
+    let pieces = rd.split(/(?:\[([^\]]+)\])?{@link(code|plain|)\s+([^| \t}]*)(?:[| \t]([^}]*))?}/);
+    for(;;) {
+        const text = pieces.shift();
+        if (typeof(text) === 'undefined') {
+            return out;
+        }
+        out += text;
+        let linkText = pieces.shift();
+        if (typeof(linkText) === 'undefined') {
+            linkText = '';
+        }
+        const linkType = pieces.shift();
+        if (typeof(linkType) === 'undefined') {
+            return out;
+        }
+        let start = '\\link';
+        let end = '';
+        if (linkType !== 'plain') {
+            start = '\\code{' + start;
+            end = end + '}';
+        }
+        const target = pieces.shift();
+        if (typeof(target) === 'undefined') {
+            return out;
+        }
+        const linkText2 = pieces.shift();
+        if (typeof(linkText2) !== 'undefined') {
+            if (linkText) {
+                console.error('Link text defined twice: ' + linkText + ' and ' + linkText2);
+            }
+            linkText = linkText2;
+        }
+        if (linkText) {
+            start += '[=' + linkText + ']';
+        }
+        if (target in packages) {
+            start = start + '[';
+            end = ']' + end;
+        } else if (target.match(/^\s*[a-z]+:\/\//)) {
+            if (linkText) {
+                start = '\\href{';
+                end = '}{' + linkText + '}';
+            } else {
+                start = '\\url{';
+                end = '}';
+            }
+        } else if (target) {
+            start = start + '{';
+            end = '}' + end;
+        }
+        out += start + target + end;
+    }
+}
+
 /**
     @param {TAFFY} taffyData See <http://taffydb.com/>.
     @param {object} opts
     @param {Tutorial} tutorials
  */
 exports.publish = (taffyData, opts, tutorials) => {
-    let classes;
     let conf;
-    let externals;
-    let files;
-    let fromDir;
     let globalUrl;
     let indexUrl;
-    let interfaces;
-    let members;
-    let mixins;
-    let modules;
-    let namespaces;
-    let outputSourceFiles;
-    let packageInfo;
-    let packages;
     const sourceFilePaths = [];
     let sourceFiles = {};
-    let staticFileFilter;
-    let staticFilePaths;
-    let staticFiles;
-    let staticFileScanner;
     let templatePath;
 
     data = taffyData;
@@ -112,12 +118,6 @@ exports.publish = (taffyData, opts, tutorials) => {
     globalUrl = helper.getUniqueFilename('global');
     helper.registerLink('global', globalUrl);
 
-    // set up templating
-    // view.layout = conf.default.layoutFile ?
-    //     path.getResourcePath(path.dirname(conf.default.layoutFile),
-    //         path.basename(conf.default.layoutFile) ) :
-    //     'layout.tmpl';
-
     // set up tutorials for helper
     helper.setTutorials(tutorials);
 
@@ -126,32 +126,34 @@ exports.publish = (taffyData, opts, tutorials) => {
     helper.addEventListeners(data);
 
     fs.mkPath(outdir);
-    data().each(doclet => {
-        console.log('DOCLET:', doclet.kind, doclet.name, doclet.longname);
-        if (typeof(doclet.meta) === 'object') {
-            console.log('path, filename:', doclet.meta.filename, doclet.meta.path);
-        } else {
-            console.log('[no metadata]');
+    const doclets = data();
+    const packages = {};
+    doclets.each(doclet => {
+        if (doclet.kind === 'package') {
+            packages[doclet.name] = true;
         }
-        console.log('vars, scope:', doclet.vars, doclet.scope);
-        console.log(doclet.description);
+    });
+    doclets.each(doclet => {
+        //console.log('DOCLET:', doclet.kind, doclet.name, doclet.longname);
+        //console.log('vars, scope:', doclet.vars, doclet.scope);
         for (let i in doclet.params) {
             const p = doclet.params[i];
-            console.log('Param:', p.name, p.type, p.description);
         }
         for (let i in doclet.properties) {
             const p = doclet.properties[i];
-            console.log('Param:', p.name, p.type, p.description);
         }
         if (doclet.kind !== 'package') {
             let title = doclet.name;
             let description = doclet.description;
+            if (typeof(description) === 'undefined') {
+                description = '';
+            }
             const paragraphs = description.split(/(?:\n|\r|\r\n){2}/);
             if (1 < paragraphs.length) {
                 title = paragraphs.shift();
                 description = paragraphs.join('\n\n');
             }
-            const rd = view.render('rd.tmpl', {
+            let rd = view.render('rd.tmpl', {
                 title: title,
                 filename: doclet.meta.filename,
                 name: doclet.longname,
@@ -159,8 +161,8 @@ exports.publish = (taffyData, opts, tutorials) => {
                 params: typeof(doclet.params) !== 'object'? [] : doclet.params,
                 properties: doclet.properties,
             });
+            rd = linkifyRd(rd, packages);
             const outpath = path.join(outdir, doclet.name + '.Rd');
-            console.log('outpath:', outpath);
             fs.writeFileSync(outpath, rd, 'utf8');
             console.log(rd);
         }
