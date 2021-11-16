@@ -142,6 +142,7 @@ exports.publish = (taffyData, opts, tutorials) => {
         for (let i in doclet.properties) {
             const p = doclet.properties[i];
         }
+        let rd = '';
         if (doclet.kind !== 'package') {
             let title = doclet.name;
             let description = doclet.description;
@@ -153,7 +154,7 @@ exports.publish = (taffyData, opts, tutorials) => {
                 title = paragraphs.shift();
                 description = paragraphs.join('\n\n');
             }
-            let rd = view.render('rd.tmpl', {
+            rd = view.render('rd.tmpl', {
                 title: title,
                 filename: doclet.meta.filename,
                 name: doclet.longname,
@@ -162,9 +163,6 @@ exports.publish = (taffyData, opts, tutorials) => {
                 properties: doclet.properties,
             });
             rd = linkifyRd(rd, packages);
-            const outpath = path.join(outdir, doclet.name + '.Rd');
-            fs.writeFileSync(outpath, rd, 'utf8');
-            console.log(rd);
         }
         let sourcePath;
 
@@ -185,7 +183,21 @@ exports.publish = (taffyData, opts, tutorials) => {
                     code: code || example
                 };
             });
+            doclet.examples.forEach(e => {
+                rd += '\n\\examples{\\dontrun{\n';
+                if (e.caption) {
+                    rd += e.caption.replace(/^/mg, '# ');
+                }
+                rd += e.code + '\n}}\n';
+            });
         }
+
+        if (rd) {
+            const outpath = path.join(outdir, doclet.name + '.Rd');
+            fs.writeFileSync(outpath, rd, 'utf8');
+            console.log(rd);
+        }
+
         if (doclet.see) {
             doclet.see.forEach((seeItem, i) => {
                 doclet.see[i] = hashToLink(doclet, seeItem);
