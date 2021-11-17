@@ -33,7 +33,7 @@ function getPathFromDoclet({meta}) {
         meta.filename;
 }
 
-function linkifyRd(rd, packages) {
+function linkifyRd(rd) {
     let out = '';
     let pieces = rd.split(/(?:\[([^\]]+)\])?{@link(code|plain|)\s+([^| \t}]*)(?:[| \t]([^}]*))?}/);
     for(;;) {
@@ -70,10 +70,7 @@ function linkifyRd(rd, packages) {
         if (linkText) {
             start += '[=' + linkText + ']';
         }
-        if (target in packages) {
-            start = start + '[';
-            end = ']' + end;
-        } else if (target.match(/^\s*[a-z]+:\/\//)) {
+        if (target.match(/^\s*[a-z]+:\/\//)) {
             if (linkText) {
                 start = '\\href{';
                 end = '}{' + linkText + '}';
@@ -82,6 +79,8 @@ function linkifyRd(rd, packages) {
                 end = '}';
             }
         } else if (target) {
+            // TODO: if target is a package '[' and ']' should be
+            // added instead
             start = start + '{';
             end = '}' + end;
         }
@@ -126,14 +125,7 @@ exports.publish = (taffyData, opts, tutorials) => {
     helper.addEventListeners(data);
 
     fs.mkPath(outdir);
-    const doclets = data();
-    const packages = {};
-    doclets.each(doclet => {
-        if (doclet.kind === 'package') {
-            packages[doclet.name] = true;
-        }
-    });
-    doclets.each(doclet => {
+    data().each(doclet => {
         //console.log('DOCLET:', doclet.kind, doclet.name, doclet.longname);
         //console.log('vars, scope:', doclet.vars, doclet.scope);
         for (let i in doclet.params) {
@@ -143,7 +135,8 @@ exports.publish = (taffyData, opts, tutorials) => {
             const p = doclet.properties[i];
         }
         let rd = '';
-        if (doclet.kind !== 'package') {
+        // 'package' and 'typedef' are other possibilities for kind
+        if (doclet.kind === 'function' || doclet.kind === 'member') {
             let title = doclet.name;
             let description = doclet.description;
             if (typeof(description) === 'undefined') {
@@ -162,9 +155,8 @@ exports.publish = (taffyData, opts, tutorials) => {
                 params: typeof(doclet.params) !== 'object'? [] : doclet.params,
                 properties: doclet.properties,
             });
-            rd = linkifyRd(rd, packages);
+            rd = linkifyRd(rd);
         }
-        let sourcePath;
 
         doclet.attribs = '';
 
@@ -195,7 +187,6 @@ exports.publish = (taffyData, opts, tutorials) => {
         if (rd) {
             const outpath = path.join(outdir, doclet.name + '.Rd');
             fs.writeFileSync(outpath, rd, 'utf8');
-            console.log(rd);
         }
 
         if (doclet.see) {
@@ -206,7 +197,7 @@ exports.publish = (taffyData, opts, tutorials) => {
 
         // build a list of source files
         if (doclet.meta) {
-            sourcePath = getPathFromDoclet(doclet);
+            let sourcePath = getPathFromDoclet(doclet);
             sourceFiles[sourcePath] = {
                 resolved: sourcePath,
                 shortened: null
